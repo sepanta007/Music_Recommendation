@@ -4,6 +4,19 @@ import pandas as pd
 file_path = 'data/tcc_ceds_music.csv'
 music_data = pd.read_csv(file_path)
 
+# Display initial columns for verification
+print("Initial columns:", music_data.columns)
+
+# Drop unnecessary columns
+columns_to_drop = ['Unnamed: 0', 'lyrics', 'len', 'age']
+music_data.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+
+# Save the cleaned dataset back to the same file
+output_path = 'data/tcc_ceds_music.csv'
+music_data.to_csv(output_path, index=False)
+
+print(f"Dataset saved after removing columns {columns_to_drop}. Current columns:")
+
 # Assign unique IDs to each unique (track_name, artist_name) combination
 music_data['track_id'] = music_data[['track_name', 'artist_name']].apply(tuple, axis=1).factorize()[0] + 1
 
