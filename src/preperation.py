@@ -5,9 +5,6 @@ file_path = 'data/tcc_ceds_music.csv'
 music_data = pd.read_csv(file_path)
 
 # Display initial columns for verification
-print("Initial columns:", music_data.columns)
-
-# Drop unnecessary columns
 columns_to_drop = ['Unnamed: 0', 'lyrics', 'len', 'age']
 music_data.drop(columns=columns_to_drop, inplace=True, errors='ignore')
 
@@ -15,7 +12,7 @@ music_data.drop(columns=columns_to_drop, inplace=True, errors='ignore')
 output_path = 'data/tcc_ceds_music.csv'
 music_data.to_csv(output_path, index=False)
 
-print(f"Dataset saved after removing columns {columns_to_drop}. Current columns:")
+print(f"Dataset saved after removing columns {columns_to_drop}.")
 
 # Assign unique IDs to each unique (track_name, artist_name) combination
 music_data['track_id'] = music_data[['track_name', 'artist_name']].apply(tuple, axis=1).factorize()[0] + 1
@@ -33,8 +30,6 @@ genre_mapping = {
     'rock': 6,
     'hip hop': 7
 }
-
-# Map genres to their corresponding IDs
 music_data['genre_id'] = music_data['genre'].map(genre_mapping)
 
 # Define columns for topics and audio features
@@ -45,31 +40,36 @@ topic_columns = [
     'like/girls', 'sadness', 'feelings'
 ]
 
+topic_mapping = {topic: i + 1 for i, topic in enumerate(topic_columns)}
+
 audio_features = ['danceability', 'loudness', 'acousticness', 'instrumentalness', 'valence', 'energy']
 
-# Convert topic_columns and audio_features to numeric with detailed inspection
+# Convert topic_columns and audio_features to numeric
 for col in topic_columns + audio_features:
-    print(f"Cleaning and converting column: {col}")
-    music_data[col] = pd.to_numeric(music_data[col], errors='coerce')  # Force numeric conversion
-    print(f"NaN values detected in column '{col}': {music_data[col].isna().sum()}")
-    music_data[col].fillna(0, inplace=True)  # Replace NaN with 0
-    print(f"Unique values in '{col}': {music_data[col].unique()[:10]}")  # Display first 10 unique values
+    music_data[col] = pd.to_numeric(music_data[col], errors='coerce').fillna(0)
 
 # Process each track and create vectors
 vector_data = []
 for _, row in music_data.iterrows():
     # Extract top 3 topics
     try:
-        top_topics = row[topic_columns].astype(float).nlargest(3).index.tolist()
-        topic_1, topic_2, topic_3 = top_topics
+        sorted_topics = row[topic_columns].astype(float).nlargest(3)
+        top_topics = [
+            (topic_mapping[topic], float(sorted_topics[topic]))  # Convert to native float
+            for topic in sorted_topics.index
+        ]
+        topic_1 = top_topics[0]
+        topic_2 = top_topics[1]
+        topic_3 = top_topics[2]
     except Exception as e:
-        print(f"Error processing row: {row}")
+        print(f"Error processing topics for row: {row}")
         print(f"Exception: {e}")
         continue  # Skip problematic rows
 
     # Extract top 3 audio features
     try:
-        top_features = row[audio_features].astype(float).nlargest(3).index.tolist()
+        sorted_features = row[audio_features].astype(float).nlargest(3)
+        top_features = sorted_features.index.tolist()
         feature_1, feature_2, feature_3 = top_features
     except Exception as e:
         print(f"Error processing audio features for row: {row}")
