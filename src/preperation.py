@@ -43,6 +43,7 @@ topic_columns = [
 topic_mapping = {topic: i + 1 for i, topic in enumerate(topic_columns)}
 
 audio_features = ['danceability', 'loudness', 'acousticness', 'instrumentalness', 'valence', 'energy']
+audio_feature_mapping = {feature: i + 1 for i, feature in enumerate(audio_features)}
 
 # Convert topic_columns and audio_features to numeric
 for col in topic_columns + audio_features:
@@ -69,8 +70,13 @@ for _, row in music_data.iterrows():
     # Extract top 3 audio features
     try:
         sorted_features = row[audio_features].astype(float).nlargest(3)
-        top_features = sorted_features.index.tolist()
-        feature_1, feature_2, feature_3 = top_features
+        top_features = [
+            (audio_feature_mapping[feature], float(sorted_features[feature]))  # Convert to native float
+            for feature in sorted_features.index
+        ]
+        feature_1 = top_features[0]
+        feature_2 = top_features[1]
+        feature_3 = top_features[2]
     except Exception as e:
         print(f"Error processing audio features for row: {row}")
         print(f"Exception: {e}")
