@@ -168,8 +168,8 @@ def hybrid_recommendation_system(initial_query_id, tracks_data, weights, metadat
         recommendations_with_weights = sorted(recommendations_with_weights, key=lambda x: x[1], reverse=True)
 
         # Display all candidate recommendations with weights
-        print(
-            f"All candidates with weights (sorted): {recommendations_with_weights[:10]}")  # Display top 10 for brevity
+        print( # Display top 10 for brevity
+            f"First 10 candidates between all candidates with weights (sorted): {recommendations_with_weights[:10]}")
 
         # Take the top 3 recommendations
         new_recommendations = [rec[0] for rec in recommendations_with_weights[:3]]
