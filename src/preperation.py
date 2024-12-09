@@ -32,6 +32,15 @@ genre_mapping = {
 }
 music_data['genre_id'] = music_data['genre'].map(genre_mapping)
 
+# Normalize artist_id (1 to max artist_id)
+music_data['normalized_artist_id'] = (music_data['artist_id'] - 1) / (music_data['artist_id'].max() - 1)
+
+# Normalize release_date (1950 to 2019)
+music_data['normalized_release_date'] = (music_data['release_date'] - 1950) / (2019 - 1950)
+
+# Normalize genre_id (1 to 7)
+music_data['normalized_genre_id'] = (music_data['genre_id'] - 1) / (7 - 1)
+
 # Define columns for topics and audio features
 topic_columns = [
     'dating', 'violence', 'world/life', 'night/time', 'shake the audience',
@@ -82,12 +91,12 @@ for _, row in music_data.iterrows():
         print(f"Exception: {e}")
         continue  # Skip problematic rows
 
-    # Create a vector with required fields
+    # Create a vector with normalized and original fields
     vector = {
         'track_id': row['track_id'],
-        'artist_id': row['artist_id'],
-        'release_date': row['release_date'],
-        'genre_id': row['genre_id'],
+        'normalized_artist_id': row['normalized_artist_id'],
+        'normalized_release_date': row['normalized_release_date'],
+        'normalized_genre_id': row['normalized_genre_id'],
         'topic_1': topic_1,
         'topic_2': topic_2,
         'topic_3': topic_3,
@@ -104,4 +113,4 @@ vector_df = pd.DataFrame(vector_data)
 output_path = 'data/vectorized_tracks.csv'
 vector_df.to_csv(output_path, index=False)
 
-print(f"Vectorized track data has been saved to '{output_path}'.")
+print(f"Vectorized track data with normalized fields has been saved to '{output_path}'.")
