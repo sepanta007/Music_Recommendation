@@ -1,10 +1,11 @@
 import pandas as pd
 
+import math
 
 # Function to calculate the similarity weight between two tracks
 def calculate_edge_weight(track_u, track_v, weights):
     """
-    Calculates the weighted similarity between two tracks based on multiple criteria.
+    Calculates the weighted similarity between two tracks with dynamic weight adjustments based on conditions.
 
     Parameters:
     - track_u, track_v: Dictionaries representing the tracks.
@@ -13,39 +14,74 @@ def calculate_edge_weight(track_u, track_v, weights):
     Returns:
     - The weighted similarity value.
     """
-    # Criterion: Artist similarity
-    artist_sim = 1 if track_u['normalized_artist_id'] == track_v['normalized_artist_id'] else 0
 
-    # Criterion: Genre similarity
+    # Criterion: Artist similarity (using distance between artists, the farther apart, the lower the weight)
+    artist_distance = abs(track_u['normalized_artist_id'] - track_v['normalized_artist_id'])
+    artist_sim = 1 / (1 + artist_distance)  # Using inverse to penalize large distances
+
+    # Adjust the artist weight based on distance (greater distance, less similarity)
+    if artist_distance == 0:
+        artist_weight = weights['artist'] * 2  # High similarity
+    elif artist_distance <= 5:
+        artist_weight = weights['artist'] * 1.5  # Moderate similarity
+    else:
+        artist_weight = weights['artist']  # Less similarity
+
+    # Criterion: Genre similarity with non-linear weight adjustment
     genre_sim = 1 if track_u['normalized_genre_id'] == track_v['normalized_genre_id'] else 0
 
-    # Criterion: Temporal proximity (release year)
+    # Apply non-linear weight adjustment based on genre popularity (log scale)
+    genre_weight = weights['genre'] * 1  # Keeping a simple constant weight for genre similarity
+
+    # Criterion: Temporal proximity (time difference with logarithmic scale)
     time_diff = abs(track_u['normalized_release_date'] - track_v['normalized_release_date'])
-    time_sim = 1 / (1 + time_diff)
+    time_sim = 1 / (1 + math.exp(0.1 * time_diff))  # Exponential decay function
 
-    # Criterion: Similarity of dominant topics
-    topic_sim = sum(
-        (3 - i) * (track_u[f'topic_{i + 1}'] == track_v[f'topic_{i + 1}'])
-        for i in range(3)
-    )
+    # Adjust the time weight based on time difference using logarithmic scale
+    if time_diff == 0:
+        time_weight = weights['time'] * 2  # Same release date, max similarity
+    else:
+        time_weight = weights['time'] * math.log(time_diff + 1)  # Penalize by log of time difference
 
-    # Criterion: Similarity of dominant audio features
-    feature_sim = sum(
-        (3 - i) * (track_u[f'feature_{i + 1}'] == track_v[f'feature_{i + 1}'])
-        for i in range(3)
-    )
+    # Criterion: Topic similarity with popularity adjustment
+    topic_u = sorted([track_u[f'topic_{i + 1}'][0] for i in range(3)])
+    topic_v = sorted([track_v[f'topic_{i + 1}'][0] for i in range(3)])
+    topic_intersection = len(set(topic_u).intersection(set(topic_v)))
+    topic_sim = topic_intersection / (len(topic_u) + len(topic_v) - topic_intersection)  # Jaccard-like similarity
 
-    # Weighted linear combination
+    # Adjust the topic weight based on topic intersection
+    topic_weight = weights['topic'] * 1  # Constant weight for topic similarity
+
+    # Criterion: Feature similarity with a weighted intersection
+    feature_u = sorted([track_u[f'feature_{i + 1}'][0] for i in range(3)])
+    feature_v = sorted([track_v[f'feature_{i + 1}'][0] for i in range(3)])
+    feature_intersection = len(set(feature_u).intersection(set(feature_v)))
+    feature_sim = feature_intersection / (
+                len(feature_u) + len(feature_v) - feature_intersection)  # Jaccard-like similarity
+
+    # Adjust feature weight based on specificity
+    feature_weight = weights['feature'] * math.sqrt(feature_intersection + 1)  # Square root to reduce impact
+
+    # Weighted sum of all similarities with dynamic weight adjustments
     weight = (
-        weights['artist'] * artist_sim +
-        weights['genre'] * genre_sim +
-        weights['time'] * time_sim +
-        weights['topic'] * topic_sim +
-        weights['feature'] * feature_sim
+            artist_weight * artist_sim +
+            genre_weight * genre_sim +
+            time_weight * time_sim +
+            topic_weight * topic_sim +
+            feature_weight * feature_sim
     )
 
     return weight
 
+
+# Define weights for each criterion (can be adjusted to prioritize one criterion over another)
+weights = {
+    'artist': 3,
+    'genre': 5,
+    'time': 2,
+    'topic': 4,
+    'feature': 4
+}
 
 # Load the vectorized track data
 file_path = 'data/vectorized_tracks.csv'
@@ -59,15 +95,6 @@ columns_to_use = [
     'track_id'
 ]
 tracks_data = tracks_data[columns_to_use]
-
-# Define weights for each criterion
-weights = {
-    'artist': 5,
-    'genre': 3,
-    'time': 1,
-    'topic': 2,
-    'feature': 2
-}
 
 
 # Function to recommend songs
@@ -128,64 +155,52 @@ def get_track_metadata(track_id, metadata):
     return None, None
 
 
-# Updated hybrid recommendation system with final playlist details
-def hybrid_recommendation_system(initial_query_id, tracks_data, weights, metadata, interactions=3,
-                                 max_playlist_size=100):
+# Updated hybrid recommendation system to generate a full playlist from the original song
+def hybrid_recommendation_system(initial_query_id, tracks_data, weights, metadata, max_playlist_size=100):
     """
-    Hybrid system that initially recommends a list of songs
-    and recalculates after a set number of interactions.
+    Hybrid system that generates a playlist starting from the initial song without recalculating at each step.
+    The playlist is created by calculating the weights once for the initial song and then adding recommended tracks.
 
     Parameters:
     - initial_query_id: ID of the starting track.
     - tracks_data: DataFrame of track data.
     - weights: Dictionary of weights for criteria.
     - metadata: DataFrame containing track metadata.
-    - interactions: Number of interactions before recalculating recommendations.
     - max_playlist_size: Maximum size of the generated playlist.
 
     Returns:
     - A final playlist of recommended songs with metadata.
     """
-    current_query_id = initial_query_id
     exclude_ids = set()
     playlist = []
 
+    # Get the recommendations for the current track
+    recommendations_with_weights = []
+    query_track = tracks_data[tracks_data['track_id'] == initial_query_id].iloc[0].to_dict()
+
+    for _, candidate_track in tracks_data.iterrows():
+        candidate_track = candidate_track.to_dict()
+        if candidate_track['track_id'] in exclude_ids or candidate_track['track_id'] == initial_query_id:
+            continue
+        weight = calculate_edge_weight(query_track, candidate_track, weights)
+        recommendations_with_weights.append((candidate_track['track_id'], weight))
+
+    # Sort recommendations by descending weight
+    recommendations_with_weights = sorted(recommendations_with_weights, key=lambda x: x[1], reverse=True)
+
+    # Add the top recommendations to the playlist until we reach the desired size
     while len(playlist) < max_playlist_size:
-        print(f"\n--- Calculating recommendations for track ID {current_query_id} ---")
+        # Take the top recommendation
+        top_recommendation = recommendations_with_weights.pop(0)[0]  # Get track ID of the top recommendation
+        playlist.append(top_recommendation)
+        exclude_ids.add(top_recommendation)
 
-        # Get the top 3 recommendations for the current track
-        recommendations_with_weights = []
-        query_track = tracks_data[tracks_data['track_id'] == current_query_id].iloc[0].to_dict()
-
-        for _, candidate_track in tracks_data.iterrows():
-            candidate_track = candidate_track.to_dict()
-            if candidate_track['track_id'] in exclude_ids or candidate_track['track_id'] == current_query_id:
-                continue
-            weight = calculate_edge_weight(query_track, candidate_track, weights)
-            recommendations_with_weights.append((candidate_track['track_id'], weight))
-
-        # Sort recommendations by descending weight
-        recommendations_with_weights = sorted(recommendations_with_weights, key=lambda x: x[1], reverse=True)
-
-        # Display all candidate recommendations with weights
-        print( # Display top 10 for brevity
-            f"First 10 candidates between all candidates with weights (sorted): {recommendations_with_weights[:10]}")
-
-        # Take the top 3 recommendations
-        new_recommendations = [rec[0] for rec in recommendations_with_weights[:3]]
-        print(f"Selected top 3 recommendations: {new_recommendations}")
-
-        # Add new recommendations to the playlist
-        playlist.extend(new_recommendations)
-        exclude_ids.update(new_recommendations)
-
-        if len(new_recommendations) == 0:
-            print("No more recommendations available. Stopping.")
-            break  # Stop if no more recommendations are available
-
-        # Move to the third track in the recommendations if available
-        current_query_id = new_recommendations[min(2, len(new_recommendations) - 1)]
-        print(f"Next query track set to: {current_query_id}")
+        # If there are more recommendations, process the next batch
+        if recommendations_with_weights:
+            recommendations_with_weights = sorted(recommendations_with_weights, key=lambda x: x[1], reverse=True)
+        else:
+            print("No more recommendations available.")
+            break  # Stop if there are no more recommendations
 
     # Fetch metadata for the initial track
     initial_artist, initial_song = get_track_metadata(initial_query_id, metadata)
@@ -202,23 +217,28 @@ def hybrid_recommendation_system(initial_query_id, tracks_data, weights, metadat
     print(f"\n--- Final Generated Playlist ---")
     for track_id in playlist[:max_playlist_size]:
         artist_name, track_name = get_track_metadata(track_id, metadata)
+        genre = metadata.loc[metadata['track_id'] == track_id, 'genre'].values[0]  # Get genre
+        release_date = metadata.loc[metadata['track_id'] == track_id, 'release_date'].values[0]  # Get release date
+
         if artist_name and track_name:
-            print(f"Track ID: {track_id} | Artist: {artist_name} | Song: {track_name}")
-            final_playlist.append((track_id, artist_name, track_name))
+            print(
+                f"Track ID: {track_id} | Artist: {artist_name} | Song: {track_name} | Genre: {genre} | Release Date: {release_date}")
+            final_playlist.append((track_id, artist_name, track_name, genre,
+                                   release_date))  # Add genre and release date to the final playlist
         else:
             print(f"Track ID: {track_id} | Metadata not found!")
-            final_playlist.append((track_id, None, None))
+            final_playlist.append(
+                (track_id, None, None, None, None))  # Append None for genre and release date if metadata is missing
 
     return final_playlist
 
 
 # Example usage
-initial_track_id = 1  # Starting track ID
+initial_track_id = 8356  # Starting track ID
 recommended_playlist = hybrid_recommendation_system(
     initial_query_id=initial_track_id,
     tracks_data=tracks_data,
     weights=weights,
     metadata=metadata,
-    interactions=3,
     max_playlist_size=100
 )
