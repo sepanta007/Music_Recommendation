@@ -22,8 +22,6 @@ def calculate_edge_weight(track_u, track_v, weights):
     # Adjust the artist weight based on distance (greater distance, less similarity)
     if artist_distance == 0:
         artist_weight = weights['artist'] * 2  # High similarity
-    elif artist_distance <= 5:
-        artist_weight = weights['artist'] * 1.5  # Moderate similarity
     else:
         artist_weight = weights['artist']  # Less similarity
 
@@ -78,7 +76,7 @@ def calculate_edge_weight(track_u, track_v, weights):
 weights = {
     'artist': 3,
     'genre': 5,
-    'time': 2,
+    'time': 1,
     'topic': 4,
     'feature': 4
 }
