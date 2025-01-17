@@ -1,116 +1,191 @@
 import pandas as pd
+import ast
+import os
 
-# Load the dataset
-file_path = 'data/tcc_ceds_music.csv'
-music_data = pd.read_csv(file_path)
 
-# Display initial columns for verification
-columns_to_drop = ['Unnamed: 0', 'lyrics', 'len', 'age']
-music_data.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+def validate_file(file_path):
+    """Check if the file exists and is readable."""
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
 
-# Save the cleaned dataset back to the same file
-output_path = 'data/tcc_ceds_music.csv'
-music_data.to_csv(output_path, index=False)
 
-print(f"Dataset saved after removing columns {columns_to_drop}.")
+def generate_unique_ID_for_each_genre():
+    """
+    Generates a unique ID for each genre in the 'genres' column of the dataset.
+    Saves the mapping to 'genres_with_ids.csv'.
+    """
+    input_file = 'data/data_w_genres.csv'
+    output_file = 'data/genres_with_ids.csv'
 
-# Assign unique IDs to each unique (track_name, artist_name) combination
-music_data['track_id'] = music_data[['track_name', 'artist_name']].apply(tuple, axis=1).factorize()[0] + 1
+    # Validate file existence
+    validate_file(input_file)
 
-# Assign unique IDs to each unique artist_name
-music_data['artist_id'] = music_data['artist_name'].factorize()[0] + 1
+    # Read the CSV file
+    data = pd.read_csv(input_file)
 
-# Define genre mapping
-genre_mapping = {
-    'pop': 1,
-    'country': 2,
-    'blues': 3,
-    'jazz': 4,
-    'reggae': 5,
-    'rock': 6,
-    'hip hop': 7
-}
-music_data['genre_id'] = music_data['genre'].map(genre_mapping)
+    # Extract all genres from the 'genres' column
+    genres = data['genres'].apply(lambda x: eval(x) if isinstance(x, str) else [])
+    unique_genres = set(genre for sublist in genres for genre in sublist)
 
-# Normalize artist_id (1 to max artist_id)
-music_data['normalized_artist_id'] = (music_data['artist_id'] - 1) / (music_data['artist_id'].max() - 1)
+    # Create a mapping of genres to unique IDs
+    genre_to_id = {genre: idx for idx, genre in enumerate(sorted(unique_genres), start=1)}
 
-# Normalize release_date (1950 to 2019)
-music_data['normalized_release_date'] = (music_data['release_date'] - 1950) / (2019 - 1950)
+    # Save the mapping to a new CSV file
+    genre_mapping = pd.DataFrame(list(genre_to_id.items()), columns=['Genre', 'ID'])
+    genre_mapping.to_csv(output_file, index=False)
+    print(f"Genre-ID mapping saved to {output_file}")
 
-# Normalize genre_id (1 to 7)
-music_data['normalized_genre_id'] = (music_data['genre_id'] - 1) / (7 - 1)
 
-# Define columns for topics and audio features
-topic_columns = [
-    'dating', 'violence', 'world/life', 'night/time', 'shake the audience',
-    'family/gospel', 'romantic', 'communication', 'obscene', 'music',
-    'movement/places', 'light/visual perceptions', 'family/spiritual',
-    'like/girls', 'sadness', 'feelings'
-]
+def generate_artist_genre_mapping():
+    """
+    Maps artists to their associated genre IDs.
+    Saves the mapping to 'artist_genre_mapping.csv'.
+    """
+    input_file = 'data/data_w_genres.csv'
+    output_file = 'data/artist_genre_mapping.csv'
+    artist_column = 'artists'
+    genre_column = 'genres'
 
-topic_mapping = {topic: i + 1 for i, topic in enumerate(topic_columns)}
+    # Validate file existence
+    validate_file(input_file)
 
-audio_features = ['danceability', 'loudness', 'acousticness', 'instrumentalness', 'valence', 'energy']
-audio_feature_mapping = {feature: i + 1 for i, feature in enumerate(audio_features)}
+    # Load the dataset
+    df = pd.read_csv(input_file)
 
-# Convert topic_columns and audio_features to numeric
-for col in topic_columns + audio_features:
-    music_data[col] = pd.to_numeric(music_data[col], errors='coerce').fillna(0)
+    # Ensure required columns exist
+    if artist_column not in df.columns or genre_column not in df.columns:
+        raise ValueError(f"Columns '{artist_column}' or '{genre_column}' not found in the dataset!")
 
-# Process each track and create vectors
-vector_data = []
-for _, row in music_data.iterrows():
-    # Extract top 3 topics
-    try:
-        sorted_topics = row[topic_columns].astype(float).nlargest(3)
-        top_topics = [
-            (topic_mapping[topic], float(sorted_topics[topic]))  # Convert to native float
-            for topic in sorted_topics.index
-        ]
-        topic_1 = top_topics[0]
-        topic_2 = top_topics[1]
-        topic_3 = top_topics[2]
-    except Exception as e:
-        print(f"Error processing topics for row: {row}")
-        print(f"Exception: {e}")
-        continue  # Skip problematic rows
+    # Generate a unique genre-to-ID mapping
+    unique_genres = set()
+    df[genre_column].dropna().apply(
+        lambda x: unique_genres.update(ast.literal_eval(x) if isinstance(x, str) and x.strip() else [])
+    )
+    genre_to_id = {genre: idx + 1 for idx, genre in enumerate(sorted(unique_genres))}
 
-    # Extract top 3 audio features
-    try:
-        sorted_features = row[audio_features].astype(float).nlargest(3)
-        top_features = [
-            (audio_feature_mapping[feature], float(sorted_features[feature]))  # Convert to native float
-            for feature in sorted_features.index
-        ]
-        feature_1 = top_features[0]
-        feature_2 = top_features[1]
-        feature_3 = top_features[2]
-    except Exception as e:
-        print(f"Error processing audio features for row: {row}")
-        print(f"Exception: {e}")
-        continue  # Skip problematic rows
+    # Map each artist to their associated genre IDs
+    artist_genres = {}
+    for _, row in df.iterrows():
+        artist_name = row[artist_column]
+        genres = ast.literal_eval(row[genre_column]) if pd.notna(row[genre_column]) and row[genre_column].strip() else []
+        genre_ids = {genre_to_id[genre] for genre in genres} if genres else set()
+        if artist_name in artist_genres:
+            artist_genres[artist_name].update(genre_ids)
+        else:
+            artist_genres[artist_name] = genre_ids
 
-    # Create a vector with normalized and original fields
-    vector = {
-        'track_id': row['track_id'],
-        'normalized_artist_id': row['normalized_artist_id'],
-        'normalized_release_date': row['normalized_release_date'],
-        'normalized_genre_id': row['normalized_genre_id'],
-        'topic_1': topic_1,
-        'topic_2': topic_2,
-        'topic_3': topic_3,
-        'feature_1': feature_1,
-        'feature_2': feature_2,
-        'feature_3': feature_3
+    # Convert artist_genres dictionary into a DataFrame
+    artist_genre_df = pd.DataFrame(
+        [(artist, list(genre_ids)) for artist, genre_ids in artist_genres.items()],
+        columns=['Artist', 'Genre_IDs']
+    )
+
+    # Save the DataFrame to a CSV file
+    artist_genre_df.to_csv(output_file, index=False)
+    print(f"Artist-genre mapping saved to {output_file}")
+
+
+def process_music_data(file_path, mapping_file, output_file):
+    """
+    Processes a music dataset by:
+    1. Dropping specified columns.
+    2. Adding 'artist_id' and 'track_id' columns.
+    3. Updating the 'genre' column based on artist_genre_mapping.csv.
+    4. Computing 'topic_1', 'topic_2', and 'topic_3' for top topics.
+    5. Computing 'feature_1', 'feature_2', and 'feature_3' for top features.
+    6. Dropping rows with null values and saving the result.
+
+    Parameters:
+    - file_path (str): Path to the input CSV file.
+    - mapping_file (str): Path to the artist_genre_mapping.csv file.
+    - output_file (str): Path to save the processed CSV file.
+    """
+    # Validate file existence
+    validate_file(file_path)
+    validate_file(mapping_file)
+
+    # Load the dataset
+    df = pd.read_csv(file_path)
+
+    # Drop specified columns
+    columns_to_drop = ['Unnamed: 0', 'lyrics', 'age', 'len', 'topic']
+    df = df.drop(columns=columns_to_drop, errors='ignore')
+
+    # Drop null values
+    df.replace('<unset>', pd.NA, inplace=True)
+    df = df.dropna()
+
+    # Assign unique IDs for artist_name
+    artist_id_map = {artist: i + 1 for i, artist in enumerate(df['artist_name'].unique())}
+    df.insert(df.columns.get_loc('artist_name') + 1, 'artist_id', df['artist_name'].map(artist_id_map))
+
+    # Assign unique IDs for each track
+    df.insert(df.columns.get_loc('track_name') + 1, 'track_id', range(1, len(df) + 1))
+
+    # Load the artist-genre mapping
+    mapping_df = pd.read_csv(mapping_file)
+    mapping_df['Artist'] = mapping_df['Artist'].str.lower()
+    df['artist_name'] = df['artist_name'].str.lower()
+    artist_genre_map = dict(zip(mapping_df['Artist'], mapping_df['Genre_IDs']))
+
+    # Define default genre mappings
+    default_genre_map = {
+        'rock': [2340],
+        'blues': [300],
+        'pop': [2170],
+        'country': [698],
+        'jazz': [1527],
+        'reggae': [2316],
+        'hip hop' : [1292]
     }
-    vector_data.append(vector)
 
-# Convert the list of vectors into a DataFrame
-vector_df = pd.DataFrame(vector_data)
+    # Function to update genre
+    def update_genre(row):
+        artist = row['artist_name']
+        genre = row['genre'].lower() if pd.notna(row['genre']) else None
+        if artist in artist_genre_map:
+            if artist_genre_map[artist] != "[]":
+                return artist_genre_map[artist]
+            else :
+                return default_genre_map[genre]
+        elif genre in default_genre_map:
+            return default_genre_map[genre]
+        else:
+            return None
 
-# Save the vectorized data to a CSV file
-output_path = 'data/vectorized_tracks.csv'
-vector_df.to_csv(output_path, index=False)
+    df['genre'] = df.apply(update_genre, axis=1)
 
-print(f"Vectorized track data with normalized fields has been saved to '{output_path}'.")
+    # Process topics and features
+    topic_columns = [
+        'dating', 'violence', 'world/life', 'night/time', 'shake the audience', 'family/gospel','romantic',
+        'communication', 'obscene', 'music', 'movement/places','light/visual perceptions', 'family/spiritual',
+        'like/girls', 'sadness', 'feelings'
+    ]
+    feature_columns = ['danceability', 'loudness', 'acousticness', 'instrumentalness', 'valence', 'energy']
+
+    def get_top_values(row, columns):
+        values = [(i + 1, row[col]) for i, col in enumerate(columns)]
+        sorted_values = sorted(values, key=lambda x: x[1], reverse=True)[:3]
+        return sorted_values + [(None, None)] * (3 - len(sorted_values))
+
+    # Compute top 3 topics and features
+    df[['topic_1', 'topic_2', 'topic_3']] = df.apply(
+        lambda row: pd.Series(get_top_values(row, topic_columns)), axis=1
+    )
+    df[['feature_1', 'feature_2', 'feature_3']] = df.apply(
+        lambda row: pd.Series(get_top_values(row, feature_columns)), axis=1
+    )
+
+    # Drop original topic and feature columns
+    df = df.drop(columns=topic_columns + feature_columns, errors='ignore')
+
+    # Save the processed DataFrame
+    df.to_csv(output_file, index=False)
+    print(f"Processed data saved to {output_file}")
+
+
+# Execute all steps
+generate_unique_ID_for_each_genre()
+generate_artist_genre_mapping()
+process_music_data('data/music_1950_2019.csv',
+                   'data/artist_genre_mapping.csv', 'data/final_processed_music_data.csv')
